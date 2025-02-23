@@ -1,4 +1,5 @@
-import sqlite3
+import psycopg2
+import os
 from datetime import datetime, timedelta
 import json
 import logging
@@ -6,14 +7,25 @@ import logging
 # terminal run cmd: py track_analysis.py
 
 # logging config
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
+
+def get_db_connection():
+    conn = psycopg2.connect(
+        host = os.environ.get("SUPABASE_HOST"),
+        port = os.environ.get("SUPABASE_PORT", "6543"),
+        database = os.environ.get("SUPABASE_DB"),
+        user = os.environ.get("SUPABASE_USER"),
+        password = os.environ.get("SUPABASE_PASSWORD")
+    )
+    return conn
 
 # get recent dates from daily_snapshots
 def get_recent_dates(conn):
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT date_scraped FROM daily_snapshots ORDER BY date_scraped DESC")
     dates = [row[0] for row in cursor.fetchall()]
+    cursor.close()
     return dates
 
 # get snapshots for a given date
@@ -24,12 +36,12 @@ def get_snapshots_for_date(conn, date):
         "FROM daily_snapshots ds "
         "JOIN tracks t ON ds.track_id = t.id "
         "JOIN charts c ON ds.chart_id = c.id "
-        "WHERE ds.date_scraped = ?"
+        "WHERE ds.date_scraped = %s"
     )
     cursor.execute(query, (date,))
+    
     rows = cursor.fetchall()
     snapshots = []
-    
     for row in rows:
         snapshots.append({
             "track_id": row[0],
@@ -39,7 +51,7 @@ def get_snapshots_for_date(conn, date):
             "artist": row[4],
             "chart_name": row[5]
         })
-        
+    cursor.close()
     return snapshots
 
 # group snapshots by chart
@@ -48,10 +60,8 @@ def group_snapshots_by_chart(snapshots):
     
     for snap in snapshots:
         chart = snap["chart_name"]
-        
         if chart not in chart_dict:
             chart_dict[chart] = []
-            
         chart_dict[chart].append(snap)
         
     return chart_dict
@@ -110,18 +120,17 @@ def analyze_chart(tracks_today, tracks_yesterday):
                 "yesterday_rank": snap["rank"],
                 "trend": "falling off"
             })
-            
     return analysis
 
 # calculate track longevity (consecutive days on chart)
 def calculate_track_longevity(conn, track_id, today_date):
     cursor = conn.cursor()
-    query = "SELECT date_scraped FROM daily_snapshots WHERE track_id = ? ORDER BY date_scraped DESC"
+    query = "SELECT date_scraped FROM daily_snapshots WHERE track_id = %s ORDER BY date_scraped DESC"
     cursor.execute(query, (track_id,))
+    
     rows = cursor.fetchall()
     longevity = 0
     current_date = datetime.strptime(today_date, "%Y-%m-%d").date()
-    
     for row in rows:
         date_scraped = datetime.strptime(row[0], "%Y-%m-%d").date()
         
@@ -130,15 +139,14 @@ def calculate_track_longevity(conn, track_id, today_date):
         else:
             break
         
+    cursor.close()
     return longevity
 
 # analyze cross-chart performance (avg and best rank)
 def analyze_cross_chart(snapshots):
     performance = {}
-    
     for snap in snapshots:
         track_id = snap["track_id"]
-        
         if track_id not in performance:
             performance[track_id] = {
                 "title": snap["title"],
@@ -146,7 +154,6 @@ def analyze_cross_chart(snapshots):
                 "charts": [],
                 "ranks": []
             }
-            
         performance[track_id]["charts"].append(snap["chart_name"])
         performance[track_id]["ranks"].append(snap["rank"])
         
@@ -158,10 +165,8 @@ def analyze_cross_chart(snapshots):
 
 # main function for data analysis
 def main():
-    db_path = "qq_charts.db"
-    conn = sqlite3.connect(db_path)
+    conn = get_db_connection()
     dates = get_recent_dates(conn)
-    
     if len(dates) < 2:
         logger.info("Not enough data for analysis. At least two days of snapshots required.")
         conn.close()
@@ -170,11 +175,11 @@ def main():
     today_date = dates[0]
     yesterday_date = dates[1]
     logger.info(f"Analyzing data for {today_date} and {yesterday_date}")
+    
     snapshots_today = get_snapshots_for_date(conn, today_date)
     snapshots_yesterday = get_snapshots_for_date(conn, yesterday_date)
     charts_today = group_snapshots_by_chart(snapshots_today)
     charts_yesterday = group_snapshots_by_chart(snapshots_yesterday)
-    
     analysis_result = {}
     
     for chart, today_snaps in charts_today.items():
@@ -192,8 +197,7 @@ def main():
         "cross_chart_performance": cross_chart_result,
         "snapshots_today": snapshots_today
     }
-    
-    print(json.dumps(results, indent=4, ensure_ascii=False))
+    print(json.dumps(results, indent = 4, ensure_ascii = False))
     conn.close()
 
 if __name__ == "__main__":

@@ -1,2 +1,3 @@
 .venv/
 get_streams/
+.env
