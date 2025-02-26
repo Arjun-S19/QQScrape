@@ -11,13 +11,11 @@ import httpx
 from googletrans import Translator
 import os
 
-# terminal run cmd: py qqmusic_scraping.py
-
-app = Flask(__name__)
-
 # logging config
 logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
 
 # translator config
 translator = Translator()
@@ -46,21 +44,17 @@ QQ_MUSIC_CHART_DETAILS_URL = "http://localhost:3200/getRanks?topId={topId}"
 # in-memory cache for mids
 mid_cache = {}
 
-# get mid from cache
 def get_mid_from_cache(title, artist):
     key = f"{normalize_string(title)}_{normalize_string(artist)}"
     return mid_cache.get(key)
 
-# save mid to cache
 def save_mid_to_cache(title, artist, mid):
     key = f"{normalize_string(title)}_{normalize_string(artist)}"
     mid_cache[key] = mid
 
-# normalize string
 def normalize_string(s):
     return re.sub(r"[^a-zA-Z0-9]", "", s.lower().strip())
 
-# initialize database
 def init_database():
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -103,7 +97,6 @@ def init_database():
     conn.close()
     logger.info("Database initialized with updated schema")
 
-# fetch data from qq api
 def qq_fetch_data(url):
     try:
         logger.info(f"Fetching data from {url}")
@@ -117,7 +110,6 @@ def qq_fetch_data(url):
         logger.error(f"Error fetching data from {url}: {e}")
         return None
 
-# save tracks and charts to database; compute best rank from chart_rank
 def save_tracks_and_charts(tracks, platform, chart_name):
     try:
         conn = get_db_connection()
@@ -136,7 +128,6 @@ def save_tracks_and_charts(tracks, platform, chart_name):
         for track in tracks:
             title = track["title"]
             artist = track["artist"]
-            # compute best rank from chart_rank dictionary
             if "chart_rank" in track and track["chart_rank"]:
                 best_rank = min(track["chart_rank"].values())
             else:
@@ -170,13 +161,12 @@ def save_tracks_and_charts(tracks, platform, chart_name):
     except Exception as e:
         logger.error(f"Error saving tracks and charts: {e}")
 
-# check if text is english
 def is_english(text):
     return bool(re.fullmatch(r"[A-Za-z0-9\s.,'\"!?()&/:;-]+", text))
 
-# translate chart name (await if necessary)
 def translate_chart_name(chart_name):
     try:
+        # Some versions of googletrans might be async; handle both
         if asyncio.iscoroutinefunction(translator.translate):
             result = asyncio.run(translator.translate(chart_name, src = "zh-cn", dest = "en"))
         else:
@@ -186,7 +176,6 @@ def translate_chart_name(chart_name):
         logger.error(f"Translation error for {chart_name}: {e}")
         return chart_name
 
-# async fetch mid
 async def fetch_mid_async(session, title, artist):
     cached_mid = get_mid_from_cache(title, artist)
     if cached_mid:
@@ -218,7 +207,8 @@ async def fetch_mid_async(session, title, artist):
         data = response.json()
         song_data = data.get("data", {}).get("song", {}).get("itemlist", [])
         for song in song_data:
-            if normalize_string(song["name"]) == normalize_string(title) and normalize_string(song["singer"]) == normalize_string(artist):
+            if (normalize_string(song["name"]) == normalize_string(title)
+                    and normalize_string(song["singer"]) == normalize_string(artist)):
                 track_mid = song["mid"]
                 save_mid_to_cache(title, artist, track_mid)
                 return track_mid
@@ -226,20 +216,18 @@ async def fetch_mid_async(session, title, artist):
         logger.error(f"Error fetching MID for {title} by {artist}: {e}")
     return None
 
-# async get all mids
 async def get_all_mids(tracks):
     async with httpx.AsyncClient() as session:
         tasks = [fetch_mid_async(session, track["title"], track["artist"]) for track in tracks]
         return await asyncio.gather(*tasks)
 
-# main route
-@app.route("/scrape/qqmusic", methods = ["GET"])
-def scrape_qqmusic():
+def perform_scrape():
     charts = qq_fetch_data(QQ_MUSIC_CHARTS_URL)
     target_top_ids = {4, 26, 27, 62, 57, 28, 3, 67}
 
     if (not charts) or ("response" not in charts) or ("data" not in charts["response"]):
-        return jsonify({"Error": "Failed to fetch QQ charts"}), 500
+        logger.error("Failed to fetch QQ charts")
+        return {"Error": "Failed to fetch QQ charts"}
 
     top_lists = charts["response"]["data"]["topList"]
     all_filtered_tracks = {}
@@ -287,17 +275,28 @@ def scrape_qqmusic():
     save_tracks_and_charts(filtered_tracks, "QQ Music", "Consolidated")
     logger.info("Tracks saved successfully")
 
-    response_data = {"filtered_tracks": filtered_tracks}
-    response_json = json.dumps(response_data, ensure_ascii = False, indent = 4)
-    
+    return {"filtered_tracks": filtered_tracks}
+
+@app.route("/scrape/qqmusic", methods = ["GET"])
+def scrape_qqmusic():
+    data = perform_scrape()
+    response_json = json.dumps(data, ensure_ascii = False, indent = 4)
     return Response(response_json, content_type = "application/json")
 
-# default route
 @app.route("/", methods = ["GET"])
 def home():
     return "Flask server is up n running chief!"
 
 if __name__ == "__main__":
-    logger.info("Starting Flask app")
+    logger.info("Initializing database...")
     init_database()
-    app.run(debug = True)
+    
+    # CI environment
+    if os.getenv("CI"):
+        logger.info("CI environment detected, running scrape directly")
+        data = perform_scrape()
+        logger.info(f"Scraping done, found {len(data.get('filtered_tracks', []))} tracks")
+    # local environment
+    else:
+        logger.info("Starting Flask app")
+        app.run(debug = True)
