@@ -8,7 +8,6 @@ import json
 import re
 import asyncio
 import httpx
-from googletrans import Translator
 import os
 
 # logging config
@@ -16,9 +15,6 @@ logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-
-# translator config
-translator = Translator()
 
 # supabase db connection details
 SUPABASE_HOST = os.environ.get("SUPABASE_HOST")
@@ -128,6 +124,7 @@ def save_tracks_and_charts(tracks, platform, chart_name):
         for track in tracks:
             title = track["title"]
             artist = track["artist"]
+            song_mid = track.get("song_mid")
             if "chart_rank" in track and track["chart_rank"]:
                 best_rank = min(track["chart_rank"].values())
             else:
@@ -141,8 +138,8 @@ def save_tracks_and_charts(tracks, platform, chart_name):
             track_id = cursor.fetchone()
             if not track_id:
                 cursor.execute(
-                    "INSERT INTO tracks (title, artist, song_mid) VALUES (%s, %s, %s) RETURNING id",
-                    (title, artist, track.get("song_mid"))
+                    "INSERT INTO tracks (title, artist, song_mid) VALUES (%s, %s, %s) ON CONFLICT (song_mid) DO UPDATE SET title = EXCLUDED.title, artist = EXCLUDED.artist RETURNING id",
+                    (title, artist, song_mid)
                 )
                 track_id = cursor.fetchone()[0]
             else:
@@ -163,18 +160,6 @@ def save_tracks_and_charts(tracks, platform, chart_name):
 
 def is_english(text):
     return bool(re.fullmatch(r"[A-Za-z0-9\s.,'\"!?()&/:;-]+", text))
-
-def translate_chart_name(chart_name):
-    try:
-        # Some versions of googletrans might be async; handle both
-        if asyncio.iscoroutinefunction(translator.translate):
-            result = asyncio.run(translator.translate(chart_name, src = "zh-cn", dest = "en"))
-        else:
-            result = translator.translate(chart_name, src = "zh-cn", dest = "en")
-        return result.text
-    except Exception as e:
-        logger.error(f"Translation error for {chart_name}: {e}")
-        return chart_name
 
 async def fetch_mid_async(session, title, artist):
     cached_mid = get_mid_from_cache(title, artist)
@@ -231,36 +216,48 @@ def perform_scrape():
 
     top_lists = charts["response"]["data"]["topList"]
     all_filtered_tracks = {}
+    chart_name_translations = {
+        "巅峰榜·流行指数": "Top Chart · Popularity Index",
+        "巅峰榜·热歌": "Top Chart · Hot Songs",
+        "巅峰榜·新歌": "Top Chart · New Songs",
+        "飙升榜": "Rising Songs",
+        "电音榜": "Electronic Music Chart",
+        "巅峰榜·网络歌曲": "Top Chart · Internet Songs",
+        "巅峰榜·欧美": "Top Chart · Europe and America",
+        "听歌识曲榜": "Most Shazamed Songs"
+    }
 
     for chart in top_lists:
         if chart["id"] not in target_top_ids:
             continue
 
-        chart_name = f"{chart['topTitle']} / {translate_chart_name(chart['topTitle'])}"
-        chart_ID   = chart["id"]
+        chart_name = chart['topTitle']
+        translated_chart_name = chart_name_translations.get(chart_name, chart_name)
+        full_chart_name = f"{chart_name} / {translated_chart_name}"
+        chart_ID = chart["id"]
 
-        logger.info(f"Processing chart: {chart_name} (id: {chart_ID})")
+        logger.info(f"Processing chart: {full_chart_name} (id: {chart_ID})")
         chart_data = qq_fetch_data(QQ_MUSIC_CHART_DETAILS_URL.format(topId = chart_ID))
         if not chart_data or "response" not in chart_data or "req_1" not in chart_data["response"]:
-            logger.error(f"Failed to fetch {chart_name} {chart_ID}")
+            logger.error(f"Failed to fetch {full_chart_name} {chart_ID}")
             continue
 
         track_list = chart_data["response"]["req_1"]["data"]["data"]["song"]
 
         for track in track_list:
-            title  = track["title"]
+            title = track["title"]
             artist = track["singerName"]
-            rank   = track.get("rank")
+            rank = track.get("rank")
 
             if is_english(title) and is_english(artist):
                 track_key = (title, artist)
                 if track_key in all_filtered_tracks:
-                    all_filtered_tracks[track_key]["chart_rank"][chart_name] = rank
+                    all_filtered_tracks[track_key]["chart_rank"][full_chart_name] = rank
                 else:
                     all_filtered_tracks[track_key] = {
                         "title": title,
                         "artist": artist,
-                        "chart_rank": {chart_name: rank},
+                        "chart_rank": {full_chart_name: rank},
                         "song_mid": None
                     }
 
