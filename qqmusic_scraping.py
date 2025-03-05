@@ -121,7 +121,6 @@ def save_tracks_and_charts(tracks, platform, chart_name):
 
         date_scraped = datetime.now().strftime("%Y-%m-%d")
 
-        # Remove snapshots older than 2 days
         cursor.execute("DELETE FROM daily_snapshots WHERE date_scraped < (CURRENT_DATE - INTERVAL '2 days')")
 
         for track in tracks:
@@ -137,7 +136,7 @@ def save_tracks_and_charts(tracks, platform, chart_name):
                 logger.warning(f"Rank is None for track {title} by {artist}; skipping daily snapshot")
                 continue
 
-            cursor.execute("SELECT id FROM tracks WHERE title = %s AND artist = %s", (title, artist))
+            cursor.execute("SELECT id FROM tracks WHERE song_mid = %s", (song_mid,))
             track_id = cursor.fetchone()
             if not track_id:
                 cursor.execute(
@@ -150,12 +149,20 @@ def save_tracks_and_charts(tracks, platform, chart_name):
                 track_id = track_id[0]
                 logger.info(f"Found existing track: {title} by {artist} with MID {song_mid}")
 
-            # Update the latest snapshot if the same track/song MID is detected
             cursor.execute("""
                 INSERT INTO daily_snapshots (track_id, chart_id, rank, date_scraped)
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (track_id, chart_id, date_scraped) DO UPDATE SET rank = EXCLUDED.rank, date_scraped = EXCLUDED.date_scraped
             """, (track_id, chart_id, best_rank, date_scraped))
+
+        cursor.execute("""
+            DELETE FROM tracks
+            WHERE id NOT IN (
+                SELECT DISTINCT track_id
+                FROM daily_snapshots
+                WHERE date_scraped >= (CURRENT_DATE - INTERVAL '2 days')
+            )
+        """)
 
         conn.commit()
         cursor.close()
