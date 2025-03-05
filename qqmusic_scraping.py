@@ -121,6 +121,9 @@ def save_tracks_and_charts(tracks, platform, chart_name):
 
         date_scraped = datetime.now().strftime("%Y-%m-%d")
 
+        # Remove snapshots older than 2 days
+        cursor.execute("DELETE FROM daily_snapshots WHERE date_scraped < (CURRENT_DATE - INTERVAL '2 days')")
+
         for track in tracks:
             title = track["title"]
             artist = track["artist"]
@@ -145,10 +148,11 @@ def save_tracks_and_charts(tracks, platform, chart_name):
             else:
                 track_id = track_id[0]
 
+            # Update the latest snapshot if the same track/song MID is detected
             cursor.execute("""
                 INSERT INTO daily_snapshots (track_id, chart_id, rank, date_scraped)
                 VALUES (%s, %s, %s, %s)
-                ON CONFLICT (track_id, chart_id, date_scraped) DO NOTHING
+                ON CONFLICT (track_id, chart_id, date_scraped) DO UPDATE SET rank = EXCLUDED.rank, date_scraped = EXCLUDED.date_scraped
             """, (track_id, chart_id, best_rank, date_scraped))
 
         conn.commit()
