@@ -145,8 +145,10 @@ def save_tracks_and_charts(tracks, platform, chart_name):
                     (title, artist, song_mid)
                 )
                 track_id = cursor.fetchone()[0]
+                logger.info(f"Inserted new track: {title} by {artist} with MID {song_mid}")
             else:
                 track_id = track_id[0]
+                logger.info(f"Found existing track: {title} by {artist} with MID {song_mid}")
 
             # Update the latest snapshot if the same track/song MID is detected
             cursor.execute("""
