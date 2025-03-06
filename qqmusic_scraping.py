@@ -10,6 +10,8 @@ import asyncio
 import httpx
 import os
 
+# terminal run cmd: py qqmusic_scraping.py
+
 # logging config
 logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
@@ -61,15 +63,15 @@ def init_database():
             title TEXT NOT NULL,
             artist TEXT NOT NULL,
             song_mid TEXT UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(title, artist)
         )
     """)
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS charts(
             id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            platform TEXT NOT NULL,
+            name TEXT NOT NULL UNIQUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -79,9 +81,11 @@ def init_database():
             id SERIAL PRIMARY KEY,
             track_id INTEGER NOT NULL,
             chart_id INTEGER NOT NULL,
-            rank INTEGER NOT NULL,
-            streams INTEGER DEFAULT 0,
-            date_scraped DATE NOT NULL,
+            yesterday_rank INTEGER,
+            today_rank INTEGER NOT NULL,
+            trend TEXT CHECK (trend IN ('up','down','stable','new','removed')),
+            longevity INTEGER DEFAULT 1,
+            date_scraped TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (track_id) REFERENCES tracks(id),
             FOREIGN KEY (chart_id) REFERENCES charts(id),
             UNIQUE(track_id, chart_id, date_scraped)
@@ -91,7 +95,7 @@ def init_database():
     conn.commit()
     cursor.close()
     conn.close()
-    logger.info("Database initialized with updated schema")
+    logger.info("Database initialized with TIMESTAMP columns")
 
 def qq_fetch_data(url):
     try:
@@ -106,20 +110,11 @@ def qq_fetch_data(url):
         logger.error(f"Error fetching data from {url}: {e}")
         return None
 
-def save_tracks_and_charts(tracks, platform, chart_name):
+def save_tracks_and_charts(tracks):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-
-        cursor.execute("SELECT id FROM charts WHERE name = %s AND platform = %s", (chart_name, platform))
-        chart_id = cursor.fetchone()
-        if not chart_id:
-            cursor.execute("INSERT INTO charts (name, platform) VALUES (%s, %s) RETURNING id", (chart_name, platform))
-            chart_id = cursor.fetchone()[0]
-        else:
-            chart_id = chart_id[0]
-
-        date_scraped = datetime.now().strftime("%Y-%m-%d")
+        date_scraped = datetime.now()
 
         cursor.execute("DELETE FROM daily_snapshots WHERE date_scraped < (CURRENT_DATE - INTERVAL '2 days')")
 
@@ -127,47 +122,84 @@ def save_tracks_and_charts(tracks, platform, chart_name):
             title = track["title"]
             artist = track["artist"]
             song_mid = track.get("song_mid")
-            if "chart_rank" in track and track["chart_rank"]:
-                best_rank = min(track["chart_rank"].values())
-            else:
-                best_rank = None
+            chart_ranks = track.get("chart_rank", {})
 
-            if best_rank is None:
-                logger.warning(f"Rank is None for track {title} by {artist}; skipping daily snapshot")
-                continue
-
-            cursor.execute("SELECT id FROM tracks WHERE song_mid = %s", (song_mid,))
+            cursor.execute("SELECT id FROM tracks WHERE title = %s AND artist = %s", (title, artist))
             track_id = cursor.fetchone()
+
             if not track_id:
                 cursor.execute(
-                    "INSERT INTO tracks (title, artist, song_mid) VALUES (%s, %s, %s) ON CONFLICT (song_mid) DO UPDATE SET title = EXCLUDED.title, artist = EXCLUDED.artist RETURNING id",
+                    "INSERT INTO tracks (title, artist, song_mid) VALUES (%s, %s, %s) ON CONFLICT (title, artist) DO NOTHING RETURNING id",
                     (title, artist, song_mid)
                 )
-                track_id = cursor.fetchone()[0]
-                logger.info(f"Inserted new track: {title} by {artist} with MID {song_mid}")
-            else:
-                track_id = track_id[0]
-                logger.info(f"Found existing track: {title} by {artist} with MID {song_mid}")
+                track_id = cursor.fetchone()
+                if not track_id:
+                    cursor.execute("SELECT id FROM tracks WHERE title = %s AND artist = %s", (title, artist))
+                    track_id = cursor.fetchone()
 
-            cursor.execute("""
-                INSERT INTO daily_snapshots (track_id, chart_id, rank, date_scraped)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (track_id, chart_id, date_scraped) DO UPDATE SET rank = EXCLUDED.rank, date_scraped = EXCLUDED.date_scraped
-            """, (track_id, chart_id, best_rank, date_scraped))
+            track_id = track_id[0]
 
-        cursor.execute("""
-            DELETE FROM tracks
-            WHERE id NOT IN (
-                SELECT DISTINCT track_id
-                FROM daily_snapshots
-                WHERE date_scraped >= (CURRENT_DATE - INTERVAL '2 days')
-            )
-        """)
+            for chart_name, rank in chart_ranks.items():
+                cursor.execute("SELECT id FROM charts WHERE name = %s", (chart_name,))
+                chart_id = cursor.fetchone()
+                if not chart_id:
+                    cursor.execute("INSERT INTO charts (name) VALUES (%s) RETURNING id", (chart_name,))
+                    chart_id = cursor.fetchone()
+
+                chart_id = chart_id[0]
+
+                cursor.execute("""
+                    SELECT yesterday_rank, today_rank, trend, longevity, date_scraped
+                    FROM daily_snapshots
+                    WHERE track_id = %s AND chart_id = %s
+                    ORDER BY date_scraped DESC
+                    LIMIT 1
+                """, (track_id, chart_id))
+                prev_snapshot = cursor.fetchone()
+
+                if prev_snapshot:
+                    prev_yesterday = prev_snapshot[0]
+                    prev_today = prev_snapshot[1]
+                    prev_trend = prev_snapshot[2]
+                    prev_longevity = prev_snapshot[3]
+                    prev_date = prev_snapshot[4]
+                    y_rank = prev_today
+                    date_diff = (datetime.strptime(date_scraped, "%Y-%m-%d") - prev_date).days
+                    if date_diff == 1:
+                        new_longevity = prev_longevity + 1
+                    else:
+                        new_longevity = 1
+                else:
+                    y_rank = None
+                    new_longevity = 1
+
+                t_trend = compute_trend(y_rank, rank)
+
+                cursor.execute("""
+                    INSERT INTO daily_snapshots (
+                        track_id, chart_id, yesterday_rank, today_rank, trend, longevity, date_scraped
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (track_id, chart_id, date_scraped)
+                    DO UPDATE SET
+                        yesterday_rank = EXCLUDED.yesterday_rank,
+                        today_rank = EXCLUDED.today_rank,
+                        trend = EXCLUDED.trend,
+                        longevity = EXCLUDED.longevity
+                """, (track_id, chart_id, y_rank, rank, t_trend, new_longevity, date_scraped))
+                
+                cursor.execute("""
+                    DELETE FROM tracks
+                    WHERE id NOT IN (
+                        SELECT DISTINCT track_id
+                        FROM daily_snapshots
+                        WHERE date_scraped >= (CURRENT_DATE - INTERVAL '2 days')
+                    )
+                """)
 
         conn.commit()
         cursor.close()
         conn.close()
-        logger.info(f"Tracks and snapshots saved for chart: {chart_name}")
+        logger.info("Tracks and snapshots saved successfully.")
     except Exception as e:
         logger.error(f"Error saving tracks and charts: {e}")
 
@@ -218,17 +250,20 @@ async def get_all_mids(tracks):
     async with httpx.AsyncClient() as session:
         tasks = [fetch_mid_async(session, track["title"], track["artist"]) for track in tracks]
         return await asyncio.gather(*tasks)
+    
+def compute_trend(yesterday_rank, today_rank):
+    if yesterday_rank is None:
+        return "new"
+    if today_rank < yesterday_rank:
+        return "up"
+    elif today_rank > yesterday_rank:
+        return "down"
+    return "stable"
 
 def perform_scrape():
     charts = qq_fetch_data(QQ_MUSIC_CHARTS_URL)
     target_top_ids = {4, 26, 27, 62, 57, 28, 3, 67}
 
-    if (not charts) or ("response" not in charts) or ("data" not in charts["response"]):
-        logger.error("Failed to fetch QQ charts")
-        return {"Error": "Failed to fetch QQ charts"}
-
-    top_lists = charts["response"]["data"]["topList"]
-    all_filtered_tracks = {}
     chart_name_translations = {
         "巅峰榜·流行指数": "Top Chart · Popularity Index",
         "巅峰榜·热歌": "Top Chart · Hot Songs",
@@ -240,19 +275,26 @@ def perform_scrape():
         "听歌识曲榜": "Most Shazamed Songs"
     }
 
+    if (not charts) or ("response" not in charts) or ("data" not in charts["response"]):
+        logger.error("Failed to fetch QQ charts")
+        return {"Error": "Failed to fetch QQ charts"}
+
+    top_lists = charts["response"]["data"]["topList"]
+    all_filtered_tracks = {}
+
     for chart in top_lists:
         if chart["id"] not in target_top_ids:
             continue
 
         chart_name = chart['topTitle']
-        translated_chart_name = chart_name_translations.get(chart_name, chart_name)
-        full_chart_name = f"{chart_name} / {translated_chart_name}"
         chart_ID = chart["id"]
+        chart_name_translated = chart_name_translations.get(chart_name, chart_name)
+        chart_display_name = f"{chart_name}/{chart_name_translated}"
 
-        logger.info(f"Processing chart: {full_chart_name} (id: {chart_ID})")
+        logger.info(f"Processing chart: {chart_display_name} (id: {chart_ID})")
         chart_data = qq_fetch_data(QQ_MUSIC_CHART_DETAILS_URL.format(topId = chart_ID))
         if not chart_data or "response" not in chart_data or "req_1" not in chart_data["response"]:
-            logger.error(f"Failed to fetch {full_chart_name} {chart_ID}")
+            logger.error(f"Failed to fetch {chart_display_name} {chart_ID}")
             continue
 
         track_list = chart_data["response"]["req_1"]["data"]["data"]["song"]
@@ -265,12 +307,12 @@ def perform_scrape():
             if is_english(title) and is_english(artist):
                 track_key = (title, artist)
                 if track_key in all_filtered_tracks:
-                    all_filtered_tracks[track_key]["chart_rank"][full_chart_name] = rank
+                    all_filtered_tracks[track_key]["chart_rank"][chart_display_name] = rank
                 else:
                     all_filtered_tracks[track_key] = {
                         "title": title,
                         "artist": artist,
-                        "chart_rank": {full_chart_name: rank},
+                        "chart_rank": {chart_display_name: rank},
                         "song_mid": None
                     }
 
@@ -282,7 +324,7 @@ def perform_scrape():
         track["song_mid"] = mid
 
     logger.info("Saving tracks to database")
-    save_tracks_and_charts(filtered_tracks, "QQ Music", "Consolidated")
+    save_tracks_and_charts(filtered_tracks)
     logger.info("Tracks saved successfully")
 
     return {"filtered_tracks": filtered_tracks}
