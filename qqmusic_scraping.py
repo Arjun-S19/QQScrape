@@ -164,7 +164,7 @@ def save_tracks_and_charts(tracks):
                     prev_longevity = prev_snapshot[3]
                     prev_date = prev_snapshot[4]
                     y_rank = prev_today
-                    date_diff = (datetime.strptime(date_scraped, "%Y-%m-%d") - prev_date).days
+                    date_diff = (date_scraped.date() - prev_date.date()).days
                     if date_diff == 1:
                         new_longevity = prev_longevity + 1
                     else:
