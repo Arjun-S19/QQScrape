@@ -115,8 +115,7 @@ def save_tracks_and_charts(tracks):
         conn = get_db_connection()
         cursor = conn.cursor()
         date_scraped = datetime.now()
-
-        cursor.execute("DELETE FROM daily_snapshots WHERE date_scraped < (CURRENT_DATE - INTERVAL '2 days')")
+        active_pairs = set()
 
         for track in tracks:
             title = track["title"]
@@ -124,17 +123,28 @@ def save_tracks_and_charts(tracks):
             song_mid = track.get("song_mid")
             chart_ranks = track.get("chart_rank", {})
 
-            cursor.execute("SELECT id FROM tracks WHERE title = %s AND artist = %s", (title, artist))
+            cursor.execute(
+                "SELECT id FROM tracks WHERE title = %s AND artist = %s",
+                (title, artist)
+            )
             track_id = cursor.fetchone()
 
             if not track_id:
                 cursor.execute(
-                    "INSERT INTO tracks (title, artist, song_mid) VALUES (%s, %s, %s) ON CONFLICT (title, artist) DO NOTHING RETURNING id",
+                    """
+                    INSERT INTO tracks (title, artist, song_mid)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (title, artist) DO NOTHING
+                    RETURNING id
+                    """,
                     (title, artist, song_mid)
                 )
                 track_id = cursor.fetchone()
                 if not track_id:
-                    cursor.execute("SELECT id FROM tracks WHERE title = %s AND artist = %s", (title, artist))
+                    cursor.execute(
+                        "SELECT id FROM tracks WHERE title = %s AND artist = %s",
+                        (title, artist)
+                    )
                     track_id = cursor.fetchone()
 
             track_id = track_id[0]
@@ -143,24 +153,30 @@ def save_tracks_and_charts(tracks):
                 cursor.execute("SELECT id FROM charts WHERE name = %s", (chart_name,))
                 chart_id = cursor.fetchone()
                 if not chart_id:
-                    cursor.execute("INSERT INTO charts (name) VALUES (%s) RETURNING id", (chart_name,))
+                    cursor.execute(
+                        "INSERT INTO charts (name) VALUES (%s) RETURNING id",
+                        (chart_name,)
+                    )
                     chart_id = cursor.fetchone()
 
                 chart_id = chart_id[0]
+                active_pairs.add((track_id, chart_id))
 
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT yesterday_rank, today_rank, trend, longevity, date_scraped
                     FROM daily_snapshots
                     WHERE track_id = %s AND chart_id = %s
                     ORDER BY date_scraped DESC
                     LIMIT 1
-                """, (track_id, chart_id))
+                    """,
+                    (track_id, chart_id)
+                )
                 prev_snapshot = cursor.fetchone()
 
                 if prev_snapshot:
                     prev_yesterday = prev_snapshot[0]
                     prev_today = prev_snapshot[1]
-                    prev_trend = prev_snapshot[2]
                     prev_longevity = prev_snapshot[3]
                     prev_date = prev_snapshot[4]
                     y_rank = prev_today
@@ -175,9 +191,11 @@ def save_tracks_and_charts(tracks):
 
                 t_trend = compute_trend(y_rank, rank)
 
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO daily_snapshots (
-                        track_id, chart_id, yesterday_rank, today_rank, trend, longevity, date_scraped
+                        track_id, chart_id, yesterday_rank, today_rank,
+                        trend, longevity, date_scraped
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (track_id, chart_id, date_scraped)
                     DO UPDATE SET
@@ -185,21 +203,38 @@ def save_tracks_and_charts(tracks):
                         today_rank = EXCLUDED.today_rank,
                         trend = EXCLUDED.trend,
                         longevity = EXCLUDED.longevity
-                """, (track_id, chart_id, y_rank, rank, t_trend, new_longevity, date_scraped))
-                
-                cursor.execute("""
-                    DELETE FROM tracks
-                    WHERE id NOT IN (
-                        SELECT DISTINCT track_id
-                        FROM daily_snapshots
-                        WHERE date_scraped >= (CURRENT_DATE - INTERVAL '2 days')
-                    )
-                """)
+                    """,
+                    (track_id, chart_id, y_rank, rank, t_trend, new_longevity, date_scraped)
+                )
+
+        if active_pairs:
+            placeholders = []
+            params = []
+            for (tid, cid) in active_pairs:
+                placeholders.append("(%s, %s)")
+                params.extend([tid, cid])
+            in_clause = ", ".join(placeholders)
+            query = f"""
+                DELETE FROM daily_snapshots
+                WHERE (track_id, chart_id) NOT IN ({in_clause})
+            """
+            cursor.execute(query, params)
+        else:
+            cursor.execute("DELETE FROM daily_snapshots")
+
+        cursor.execute(
+            """
+            DELETE FROM tracks
+            WHERE id NOT IN (
+                SELECT DISTINCT track_id FROM daily_snapshots
+            )
+            """
+        )
 
         conn.commit()
         cursor.close()
         conn.close()
-        logger.info("Tracks and snapshots saved successfully.")
+        logger.info("Tracks and snapshots saved successfully with new multi-day logic.")
     except Exception as e:
         logger.error(f"Error saving tracks and charts: {e}")
 
