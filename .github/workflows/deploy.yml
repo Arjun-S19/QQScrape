@@ -24,7 +24,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: qqscrape-webapp/package-lock.json
       - name: Install Dependencies
-        run: npm ci
+        run: npm ci --force
         working-directory: qqscrape-webapp
 
       - name: Setup GitHub Pages
