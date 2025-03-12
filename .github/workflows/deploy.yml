@@ -43,10 +43,6 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
-      - name: Debug Build Output
-        run: ls -lah qqscrape-webapp/out || echo "No build output found!"
-        working-directory: qqscrape-webapp
-
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -63,3 +59,5 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v2
+        with:
+          artifact_name: github-pages
