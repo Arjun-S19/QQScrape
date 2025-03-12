@@ -23,6 +23,7 @@ jobs:
           node-version: 18
           cache: 'npm'
           cache-dependency-path: qqscrape-webapp/package-lock.json
+
       - name: Install Dependencies
         run: npm ci --force
         working-directory: qqscrape-webapp
@@ -39,6 +40,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+      - name: Debug Build Output
+        run: ls -lah qqscrape-webapp/out || echo "No build output found!"
+        working-directory: qqscrape-webapp
 
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
