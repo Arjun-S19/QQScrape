@@ -18,6 +18,7 @@ const nextConfig = {
   },
   basePath: "/QQScrape",
   assetPrefix: "/QQScrape",
+  distDir: "out",
 }
 
 mergeConfig(nextConfig, userConfig)
