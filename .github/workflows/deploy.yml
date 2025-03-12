@@ -43,7 +43,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: qqscrape-webapp/.next
+          path: qqscrape-webapp/out
 
   deploy:
     environment:
