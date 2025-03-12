@@ -16,6 +16,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  basePath: "/QQScrape",
+  assetPrefix: "/QQScrape",
 }
 
 mergeConfig(nextConfig, userConfig)
