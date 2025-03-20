@@ -16,7 +16,7 @@ QQScrape is built with two primary components:
 
 2. **Web Application**
 
-   - Developed using **Next.js** and Supabase to display real-time and historical chart data
+   - Developed using **Next.js** and shadcn/ui to display real-time and historical chart data
    - Features an interactive dashboard where users can look into chart movement, song longevity, and analytical trends
    - Implements dynamic search indexing and query optimization for the filtering and retrieval of large-scale data
    - Uses **Recharts** to visualize chart movement for a graphical perspective of song performance
