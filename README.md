@@ -1,49 +1,25 @@
 # QQScrape
 
+#### QQScrape is a web scraping and data visualization tool designed to scrape, analyze, and display music chart data from QQMusic.
+
 ## Overview
-
-QQScrape is a web scraping and data visualization tool designed to extract, analyze, and present music chart data from QQMusic. It consists of a backend scraper and a web application that provides a user-friendly interface for interacting with the collected data.
-
-## How It Works
 
 QQScrape is built with two primary components:
 
 1. **Backend Scraper**
 
-   - Utilizes **[Rain120's QQMusic API](https://github.com/Rain120/qq-music-api)** for efficient data retrieval. 
-        - Special thanks to Rain120 for developing this, as I found no other working APIs available in the US.
-   - Uses web scraping techniques to extract song rankings, metadata, and streaming statistics.
-   - Stores data in a structured format for further analysis.
+   - Utilizes **[Rain120's QQMusic API](https://github.com/Rain120/qq-music-api)** for data retrieval
+        - Special thanks to Rain120 for developing this, as I found no other working APIs available in the US
+   - Scrapes QQMusic charts, extracting song rankings, metadata, and streaming statistics
+   - Standardizes and stores data in a **PostgreSQL** database via **Supabase**
+   - Implements caching to reduce redundant API requests and improve efficiency
 
 2. **Web Application**
 
-   - Developed using **Next.js** and **Supabase** to display real-time and historical chart data.
-   - Features an interactive dashboard where users can explore ranking trends, song longevity, and comparative analysis.
-   - Implements search and filtering functionalities to easily navigate large datasets.
-   - Uses **Recharts** for data visualization, enabling users to view trends over time.
-
-### Data Collection
-
-- Fetches chart listings and identifies song metadata, including title, artist, ranking, and stream count (if available), using Rain120's QQMusic API.
-- Collects data at regular intervals to monitor ranking fluctuations over time.
-- Ensures consistency in extracted metadata for accurate tracking and analysis.
-
-### Data Processing
-
-- **Validation & Normalization:** Cleans extracted data to maintain consistency across different chart formats.
-- **Duplicate Handling:** Detects and removes redundant entries to prevent unnecessary data storage.
-- **Historical Data Archiving:** Stores past chart data for long-term comparison and trend analysis.
-- **Database Storage:** Uses PostgreSQL via Supabase for efficient querying and retrieval.
-- **Caching Mechanism:** Optimizes API calls by storing and reusing previously retrieved song metadata, reducing redundant requests.
-
-### Analysis & Insights
-
-- **Ranking Trends:** Tracks song movement over time to identify emerging trends in the QQMusic ecosystem.
-- **Longevity Analysis:** Measures how long a song remains in the charts and its ranking trajectory.
-- **Breakout Detection:** Identifies rapidly rising tracks gaining popularity.
-- **Performance Summaries:** Highlights the most stable, fastest-rising, and longest-lasting songs.
-- **Chart Comparisons:** Compares ranking fluctuations across multiple QQMusic charts to determine crossover success.
-- **API Access:** Provides structured API endpoints for seamless integration with OVG! Media’s proprietary systems.
+   - Developed using **Next.js** and Supabase to display real-time and historical chart data
+   - Features an interactive dashboard where users can look into chart movement, song longevity, and analytical trends
+   - Implements dynamic search indexing and query optimization for the filtering and retrieval of large-scale data
+   - Uses **Recharts** to visualize chart movement for a graphical perspective of song performance
 
 ## Purpose
 
