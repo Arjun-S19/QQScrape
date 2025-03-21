@@ -5,3 +5,4 @@ schedule
 httpx
 langdetect
 psycopg2
+regex
