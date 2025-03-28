@@ -4,3 +4,4 @@ pytz
 schedule
 httpx
 psycopg2
+regex

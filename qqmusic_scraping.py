@@ -4,7 +4,7 @@ import psycopg2
 from datetime import datetime
 import logging
 import json
-import re
+import regex
 import asyncio
 import httpx
 import os
@@ -50,7 +50,7 @@ def save_mid_to_cache(title, artist, mid):
     mid_cache[key] = mid
 
 def normalize_string(s):
-    return re.sub(r"[^a-zA-Z0-9]", "", s.lower().strip())
+    return regex.sub(r"[^a-zA-Z0-9]", "", s.lower().strip())
 
 def init_database():
     conn = get_db_connection()
@@ -237,8 +237,8 @@ def save_tracks_and_charts(tracks):
     except Exception as e:
         logger.error(f"Error saving tracks and charts: {e}")
 
-def is_english(text):
-    return bool(re.fullmatch(r"[A-Za-z0-9\s.,'\"!?()&/:;-]+", text))
+def is_western_cyrillic_latin(text):
+    return bool(regex.fullmatch(r"[A-Za-z\p{Cyrillic}\p{Latin}0-9\s.,'\"!?()&/:;-]+", text))
 
 async def fetch_mid_async(session, title, artist):
     cached_mid = get_mid_from_cache(title, artist)
@@ -338,7 +338,7 @@ def perform_scrape():
             artist = track["singerName"]
             rank = track.get("rank")
 
-            if is_english(title) and is_english(artist):
+            if is_western_cyrillic_latin(title) and is_western_cyrillic_latin(artist):
                 track_key = (title, artist)
                 if track_key in all_filtered_tracks:
                     all_filtered_tracks[track_key]["chart_rank"][chart_display_name] = rank
