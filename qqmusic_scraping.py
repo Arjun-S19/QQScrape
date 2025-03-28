@@ -1,6 +1,5 @@
 from flask import Flask, jsonify, Response
 import requests
-from langdetect import detect
 import psycopg2
 from datetime import datetime
 import logging

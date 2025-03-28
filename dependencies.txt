@@ -3,5 +3,4 @@ requests
 pytz
 schedule
 httpx
-langdetect
 psycopg2
