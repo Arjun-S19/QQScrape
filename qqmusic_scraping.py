@@ -278,6 +278,24 @@ async def fetch_mid_async(session, title, artist):
                 return track_mid
     except Exception as e:
         logger.error(f"Error fetching MID for {title} by {artist}: {e}")
+
+    try:
+        logger.info(f"Retrying with modified title for {title} by {artist}")
+        title = regex.sub(r"\s*\([^)]*\)$", "", title)
+        params["key"] = f"{title} {artist}"
+        response = await session.get(url, params = params, timeout = 15)
+        response.raise_for_status()
+        data = response.json()
+        song_data = data.get("data", {}).get("song", {}).get("itemlist", [])
+        for song in song_data:
+            if (normalize_string(song["name"]) == normalize_string(title)
+                    and normalize_string(song["singer"]) == normalize_string(artist)):
+                track_mid = song["mid"]
+                save_mid_to_cache(title, artist, track_mid)
+                return track_mid
+    except Exception as e:
+        logger.error(f"Error fetching MID on retry for {title} by {artist}: {e}")
+
     return None
 
 async def get_all_mids(tracks):
