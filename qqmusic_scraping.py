@@ -183,7 +183,7 @@ def save_tracks_and_charts(tracks):
                     if date_diff == 1:
                         new_longevity = prev_longevity + 1
                     else:
-                        new_longevity = 1
+                        new_longevity = prev_longevity + 1 if prev_longevity else 1
                 else:
                     y_rank = None
                     new_longevity = 1
@@ -221,6 +221,15 @@ def save_tracks_and_charts(tracks):
         else:
             cursor.execute("DELETE FROM daily_snapshots")
 
+        
+        cursor.execute(
+            """
+            DELETE FROM daily_snapshots
+            WHERE track_id NOT IN (
+                SELECT DISTINCT track_id FROM daily_snapshots
+            )
+            """
+        )
         cursor.execute(
             """
             DELETE FROM tracks
@@ -233,7 +242,7 @@ def save_tracks_and_charts(tracks):
         conn.commit()
         cursor.close()
         conn.close()
-        logger.info("Tracks and snapshots saved successfully with new multi-day logic.")
+        logger.info("Tracks and snapshots saved successfully with new multi-day logic")
     except Exception as e:
         logger.error(f"Error saving tracks and charts: {e}")
 
